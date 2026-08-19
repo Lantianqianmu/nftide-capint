@@ -47,53 +47,53 @@ This pipeline detects HBV integration from HBV-probe captured libraries. The pip
 `fastq_1`: Path to read 1.  
 `fastq_2`: Path to read 2.  
 
-(2) Unzip the files in the genome folder. It contains genome fasta files for HBV. Build bwa mem index for the HBV genome. This will be used to identify the optimal HBV genome for bwa to align against for the capture HiC library.  
+(2) Prepare the per-sample virus genome `meta_all_assembled_fa.csv`. The csv file __must__ contain 2 columns with defined column names:  
+`sample`: Name of the sequenced library. Must be the same with the sample name in step (1).
+`sequence`: Genome sequences.   
 
-(2) Unzip the files in the genome folder. It contains genome fasta files for HBV. Build bwa mem index for the HBV genome. This will be used to identify the optimal HBV genome for bwa to align against for the capture HiC library.  
-
-(3-1) If the genotype of HBV is unknown, run the nftide-caphic pipeline. Change directory to nftide-caphic with `cd nftide-caphic`, and execute:
+(3) Change directory to nftide-caphic with `cd nftide-capint`, and execute:
 ```
-nextflow run nftide-caphic.nf \
+nextflow run main.nf \
   -output-dir your_output_dir \
   --input_csv samplesheet.csv \
-  --hostGenome hg38 \
-  --original_chromsizes hg38_original_chrom_sizes.tsv \
-  --scaled_chromsizes hg38_scaled_chrom_sizes.tsv \
-  --host_fa path_to_host_fasta \
-  --allHBV_fa path_to_HBV_fasta \
-  --allHBV_bwaindex path_to_HBV_bwa_index \
-  --bin_size 1000 \
-  --covscore true \
-  --readcounts true \
-  --calc_accurate_coord false \
+  --HBVfa_csv meta_all_assembled_fa.csv \
+  --host_bwa_dir path_to_host_bwa_dir \
+  --host_bwa_prefix host_bwa_prefix \
+  --bwaMinScore 15 \
+  --minMatch 30 \
+  --minOverlap 6 \
+  --maxMismatchRate 0.2 \
+  --mergeDist 20 \
+  --peAssembleCustom false \
+  --keepUnmerged true \
+  --supportDist 300 \
   -with-report nftide-caphic_report.html \
   -with-timeline nftide-caphic_timeline.html \
   -bg -resume
 ```
 `-output-dir`: Path to the output directory.  
 `--input_csv`: Path to samplesheet.csv as described in **step (1)**.  
-`--hostGenome`: the `--assembly` parameter for `pairtools parse`.  
-`--original_chromsizes`: Path to `hg38_original_chrom_sizes.tsv`, which contains original chromsizes of the genome.  
-`--scaled_chromsizes`: Path to `hg38_original_chrom_sizes.tsv`, which contains scaled chromsizes of the genome.  
-`--host_fa`: fasta file of the host genome. Used to create merged host-virus bwa index.  
-`--allHBV_fa`: fasta file of the HBV genome, which is acquired from **step(2)**. Used to create merged host-virus bwa index.  
-`--allHBV_bwaindex`: bwa index of the HBV genome, which is acquired from **step(2)**. Used to decide the optimal HBV genome.  
-`--bin_size`: Used in `cooler cload pairs`.  
-`--covscore`: If true, the HBV genome with maximum mapped_coverage * mapped_read_counts will be selected as the optimal genome. Note: if mapped_read_counts > 100 & mapped_coverage < 20, the genome will not be considered since there might be biased amplification (high reads but low coverage). Default: true. Valid options: true, false.  
-`--readcounts`: If true, the HBV genome with maximum mapped_read_counts will be selected as the optimal genome. Default: true. Valid options: true, false. Compatible with `--covscore` as a new instance will be initiated in parallel.  
-`--calc_accurate_coord`: Whether mapping coordinates for HiC pairs should be calculated when generating contact beds and matrices. Default: false. Valid options: true, false.   
+`--HBVfa_csv`: Path to meta_all_assembled_fa.csv as described in **step (2)**.  
+`--host_bwa_dir`: Directory to bwa index of the host genome.  
+`--host_bwa_prefix`: Prefix of the bwa index of the host genome.  
+
+`--bwaMinScore`: Value for `bwa mem -T`. Minimum score to report an alignment (0 = too slow/huge output). Default: 15.  
+`--minMatch`: Minimum match length (bp) on host & HBV for a breakpoint. Default: 30. Do not set this value lower that 25, as it will introduce huge amount of false positive due to homologous sequences between HBV and host.  
+`--minOverlap`: Minimum overlap required for pair-end assembly. Default: 6.  
+`--maxMismatchRate`: Maximum mismatch rate allowed in the overlap. Default: 0.2.  
+`--mergeDist`: Merge breakpoints within this interval. Default: 20.  
+`--peAssembleCustom`: true = use the custom PE assembly script, false (default) = use `bbmerge.sh`.  
+`--keepUnmerged`: true (default) = parse and count non-overlapping chimeric pairs when calling breakpoints; false = ignore them.  
+`--supportDist`: Maximum distance (bp) from an unmerged support pair to a breakpoint (host side). Default: 300.  
 
 
 ## Expected output ##
 Go to `-output-dir`. The pipeline will create folders named according to the `sample` column in you csv file. Each folder contain 7 subfolders:  
-`fastqs`: Merged and adapter-trimmed fastqs.  
-`meta`: Optimal and assembled HBV genomes, and qc metrices.  
-`bams`: Aligned and filtered bam files.  
-`pairs`: pairtools outputs.  
-`beds`: tsv files containing contact pairs. The xbed contains contact pairs in the following order: `chr, start, end`.  
-`cools`: cool and mcool files.  
-`contact_mats`: 100kb- and 1mb- binned contact matrices in dataframe format, acquired from `cooler dump`.  
-`bw`: virus-host contact and virus-virus contact bw files for genome browser.  
+`fastqs`: Merged, adapter-trimmed, and chimeric-reads filtered fastqs.  
+`qc`: Proportion of virus reads for each library.  
+`assembly`: PE-assembled and unassembled reads.  
+`sam`: SAM files that generated from remapping chimeric reads to the host and virus genome.  
+`breakpoints`: Breakpoints called.  
 
 
 
