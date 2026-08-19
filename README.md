@@ -4,7 +4,7 @@ Nextflow pipeline for detecting HBV integration from HBV-probe enriched librarie
 
 ## System requirements ##
 The pipeline relies on _Perl 5.32.1_, and therefore runs only on a UNIX-based system. We have tested the pipeline on _Ubuntu 22.04_ server in our lab.  
-The pipeline requires >= 64 GB memory. It is recommended to have at least 8 cores. We typically run the pipeline on a server with dual Epyc 7542 and 512 GB memory.
+The pipeline requires >= 32 GB memory. It is recommended to have at least 8 cores. We typically run the pipeline on a server with dual Epyc 7542 and 512 GB memory.
 
 ## Software dependencies ##
 Dependencies  | Version
