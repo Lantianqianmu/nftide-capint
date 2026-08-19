@@ -76,7 +76,6 @@ nextflow run main.nf \
 `--HBVfa_csv`: Path to meta_all_assembled_fa.csv as described in **step (2)**.  
 `--host_bwa_dir`: Directory to bwa index of the host genome.  
 `--host_bwa_prefix`: Prefix of the bwa index of the host genome.  
-
 `--bwaMinScore`: Value for `bwa mem -T`. Minimum score to report an alignment (0 = too slow/huge output). Default: 15.  
 `--minMatch`: Minimum match length (bp) on host & HBV for a breakpoint. Default: 30. Do not set this value lower that 25, as it will introduce huge amount of false positive due to homologous sequences between HBV and host.  
 `--minOverlap`: Minimum overlap required for pair-end assembly. Default: 6.  
