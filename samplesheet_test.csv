@@ -1,0 +1,3 @@
+sample,fastq_1,fastq_2
+N10,/data/xrz/capint/data/10N/ML150013831_L01_26072600019_1.fq.gz,/data/xrz/capint/data/10N/ML150013831_L01_26072600019_2.fq.gz
+T11,/data/xrz/capint/data/11T/ML150013831_L01_26072600022_1.fq.gz,/data/xrz/capint/data/11T/ML150013831_L01_26072600022_2.fq.gz
