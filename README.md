@@ -214,7 +214,7 @@ The HBV reference remains linear and sample-specific; this revision does not
 standardize HBV coordinates between samples or resolve circular-origin crossings.
 
 
-### BBMerge wrapper output contract ###
+### BBMerge wrapper output contract (`peAssembleCustom=false`) ###
 
 `assemble_pairs.py` is the default `PE_ASSEMBLE` wrapper and runs BBMerge itself.
 It produces the same consensus sequences and qualities as the BBMerge run it
