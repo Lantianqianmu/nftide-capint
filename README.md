@@ -78,18 +78,7 @@ conda list -n nftide-capint --explicit > nftide-capint-conda-explicit.txt
 
 This repository runs the HIVID-derived BWA/BBMerge workflow described below.
 
-(3) Prepare a human BWA index and configure its directory and prefix. Current
-defaults are:
-
-```text
-Human BWA index directory: /data/xrz/ref/hg38/hg38_bwa
-Human BWA index prefix:    hg38.fa
-HBV reference CSV:         /data/xrz/capint/nextflow/meta_all_assembled_fa.csv
-```
-
-`host_bwa_prefix` is the index basename within `host_bwa_dir`, not the directory
-itself. The pipeline extracts each sample's HBV sequence from the CSV and
-builds its HBV BWA index automatically.
+(3) Prepare BWA index. 
 
 ## Overview ##
 
