@@ -275,23 +275,6 @@ observed quality; disagreements take the higher-quality base and the absolute
 Phred-quality difference, with equal-quality disagreements becoming `N` at
 Phred 0. These are simple consensus rules, not BBMerge's quality model.
 
-N5 verification used the same 3,749 deduplicated candidate pairs and parameters
-(minimum overlap 6, maximum mismatch rate 0.2) for both methods:
-
-Result | Custom | BBMerge
---- | ---: | ---:
-Merged pairs | 3,378 | 2,861
-Unmerged pairs | 371 | 888
-Merged only by this method | 600 | 83
-
-Both methods merged 2,778 shared pairs: all 2,778 sequences were identical,
-while all quality strings differed. Every input molecule was accounted for.
-More merges alone do not establish greater accuracy; the custom method uses
-simpler overlap acceptance rules. This comparison concerns assembly outputs,
-not equivalence of final N5 breakpoint calls. Detailed per-molecule results
-are saved in `/data/xrz/capint/output_custom_compare/N5/comparison.tsv`, with
-summary counts in `comparison.json` and separate FASTQs under `custom/` and
-`bbmerge/`. The custom branch also passed the synthetic full Nextflow test.
 
 ## Expected output ##
 
