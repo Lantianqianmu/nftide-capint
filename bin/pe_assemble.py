@@ -1,113 +1,101 @@
 #!/usr/bin/env python3
-"""PE-assembly of chimeric read pairs following the HIVID procedure.
+"""Custom ungapped suffix/prefix paired-read assembler.
 
-Both ends are put onto the same strand (R2 is reverse-complemented). If the
-tail of the upstream end overlaps the head of the downstream end by more than
-5 bp with a mismatch rate < 0.2 the two ends are spliced into one continuous
-sequence, the PE-assembled read. Pairs that cannot be spliced are written out
-as two separate reads so that the breakpoint search is not lost.
-
-Output: a single gzipped fastq where
-  - spliced reads are written as one record        (name)
-  - non-spliced pairs are written as two records   (name/1 and name/2)
+R2 is reverse-complemented; the longest overlap meeting min-overlap and
+max-mismatch is used. This simple algorithm is not BBMerge. Output names,
+molecule tags, mate suffixes and QC follow the Nextflow assembly contract.
 """
 import argparse
 import gzip
-import sys
+import json
+from pathlib import Path
+from assemble_pairs import paired_records, write_record
+from filter_chimeric import fastq
 
 COMP = str.maketrans('ACGTNacgtnRYSWKMryswkmBDHVbdhv',
                      'TGCANtgcanYRSWMKyrswmkVHDBvhdb')
 
 
-def revcomp(s):
-    return s.translate(COMP)[::-1]
+def revcomp(seq):
+    return seq.translate(COMP)[::-1]
 
 
-def merge(a, b, min_overlap, max_mismatch):
-    """Splice b onto the tail of a if the tail of a overlaps the head of b."""
-    max_ov = min(len(a), len(b))
-    for ov in range(max_ov, min_overlap - 1, -1):
-        mism = sum(1 for x, y in zip(a[-ov:], b[:ov]) if x != y)
-        if mism / float(ov) <= max_mismatch:
-            return a + b[ov:]
+def overlap(a, b, minimum, maximum):
+    for size in range(min(len(a), len(b)), minimum - 1, -1):
+        # Ambiguous bases do not provide evidence of an overlap.
+        mismatches = sum(x != y or x not in 'ACGT'
+                         for x, y in zip(a[-size:].upper(), b[:size].upper()))
+        if mismatches / float(size) <= maximum:
+            return size
     return None
 
 
-def assemble(r1, r2, min_overlap, max_mismatch):
-    r2rc = revcomp(r2)
-    m = merge(r1, r2rc, min_overlap, max_mismatch)
-    if m:
-        return [m]
-    r1rc = revcomp(r1)
-    m2 = merge(r2, r1rc, min_overlap, max_mismatch)
-    if m2:
-        return [m2]
-    return [r1, r2]
-
-
-def read_fastq(fh):
-    while True:
-        name = fh.readline()
-        if not name:
-            return
-        seq = fh.readline().strip()
-        fh.readline()          # '+'
-        qual = fh.readline().strip()
-        yield name.strip(), seq, qual
+def consensus(first, second, minimum, maximum):
+    name, a, aq = first
+    _, raw_b, raw_bq = second
+    b, bq = revcomp(raw_b), raw_bq[::-1]
+    size = overlap(a, b, minimum, maximum)
+    if size is None:
+        return None
+    seq, qual = list(a[:-size]), list(aq[:-size])
+    for x, y, qx, qy in zip(a[-size:], b[:size], aq[-size:], bq[:size]):
+        if x.upper() == y.upper():
+            seq.append(x)
+            qual.append(max(qx, qy))
+        else:
+            # Prefer the higher-quality observation. Equal-quality conflicts
+            # remain uncertain, rather than manufacturing a high-quality base.
+            seq.append(x if qx > qy else y if qy > qx else 'N')
+            qual.append(chr(33 + abs(ord(qx) - ord(qy))))
+    return name, ''.join(seq) + b[size:], ''.join(qual) + bq[size:]
 
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument('r1', help='chimeric R1 fastq.gz')
-    p.add_argument('r2', help='chimeric R2 fastq.gz')
-    p.add_argument('--out', default='merged.fq.gz',
-                   help='output of spliced (PE-assembled) reads')
-    p.add_argument('--out-u1', default='unmerged_R1.fq.gz',
-                   help='output of non-overlapping pair R1 (when --keep-unmerged)')
-    p.add_argument('--out-u2', default='unmerged_R2.fq.gz',
-                   help='output of non-overlapping pair R2 (when --keep-unmerged)')
-    p.add_argument('--min-overlap', type=int, default=6,
-                   help='minimum overlap (>5 bp) required for splicing')
-    p.add_argument('--max-mismatch', type=float, default=0.2,
-                   help='maximum mismatch rate allowed in the overlap')
-    p.add_argument('--keep-unmerged', action='store_true',
-                   help='also write non-overlapping pairs as /1 /2 records '
-                        '(default: only spliced reads are written)')
+    p.add_argument('r1'); p.add_argument('r2')
+    p.add_argument('--prefix', help='pipeline output prefix, including log and QC')
+    p.add_argument('--out', default='merged.fq.gz')
+    p.add_argument('--out-u1', default='unmerged_R1.fq.gz')
+    p.add_argument('--out-u2', default='unmerged_R2.fq.gz')
+    p.add_argument('--min-overlap', type=int, default=6)
+    p.add_argument('--max-mismatch', type=float, default=.2)
+    p.add_argument('--keep-unmerged', nargs='?', const='true',
+                   choices=('true', 'false'), default='false')
     args = p.parse_args()
-
-    recs = {}
-    with gzip.open(args.r1, 'rt') as fh:
-        for name, seq, qual in read_fastq(fh):
-            base = name[:-2] if name.endswith('/1') else name
-            recs.setdefault(base, {})['r1'] = seq
-    with gzip.open(args.r2, 'rt') as fh:
-        for name, seq, qual in read_fastq(fh):
-            base = name[:-2] if name.endswith('/2') else name
-            recs.setdefault(base, {})['r2'] = seq
-
-    n_pairs = 0
-    n_spliced = 0
-    out_u1 = gzip.open(args.out_u1, 'wt')   # always created (empty if not kept)
-    out_u2 = gzip.open(args.out_u2, 'wt')
-    with gzip.open(args.out, 'wt') as out:
-        for base, pair in recs.items():
-            if 'r1' not in pair or 'r2' not in pair:
-                continue
-            n_pairs += 1
-            parts = assemble(pair['r1'], pair['r2'],
-                             args.min_overlap, args.max_mismatch)
-            if len(parts) == 1:
-                n_spliced += 1
-                out.write('@{0}\n{1}\n+\n{2}\n'.format(
-                    base, parts[0], 'I' * len(parts[0])))
-            elif args.keep_unmerged:
-                out_u1.write('@{0}/1\n{1}\n+\n{2}\n'.format(
-                    base, parts[0], 'I' * len(parts[0])))
-                out_u2.write('@{0}/2\n{1}\n+\n{2}\n'.format(
-                    base, parts[1], 'I' * len(parts[1])))
-    out_u1.close()
-    out_u2.close()
-    sys.stderr.write('chimeric pairs: {0}, spliced: {1}\n'.format(n_pairs, n_spliced))
+    if args.min_overlap < 1 or not 0 <= args.max_mismatch <= 1:
+        p.error('min-overlap must be positive; max-mismatch must be between 0 and 1')
+    outputs = ([args.prefix + suffix for suffix in
+                ('_merged.fq.gz', '_unmerged_R1.fq.gz', '_unmerged_R2.fq.gz')]
+               if args.prefix else [args.out, args.out_u1, args.out_u2])
+    temporary = [Path(path + '.tmp') for path in outputs]
+    keep = args.keep_unmerged == 'true'
+    total = merged = 0
+    try:
+        with gzip.open(temporary[0], 'wt') as out, \
+             gzip.open(temporary[1], 'wt') as u1, \
+             gzip.open(temporary[2], 'wt') as u2:
+            for first, second in paired_records(fastq(args.r1), fastq(args.r2)):
+                total += 1
+                result = consensus(first, second, args.min_overlap, args.max_mismatch)
+                if result is not None:
+                    merged += 1
+                    write_record(out, result)
+                elif keep:
+                    write_record(u1, first, '/1')
+                    write_record(u2, second, '/2')
+        for source, destination in zip(temporary, outputs):
+            source.replace(destination)
+    finally:
+        for path in temporary:
+            path.unlink(missing_ok=True)
+    summary = dict(input_pairs=total, merged_pairs=merged,
+                   unmerged_pairs=total-merged, keep_unmerged=keep,
+                   emitted_unmerged_pairs=total-merged if keep else 0)
+    report = json.dumps(summary, indent=2) + '\n'
+    if args.prefix:
+        Path(args.prefix + '_assembly_qc.json').write_text(report)
+        Path(args.prefix + '_assembly.log').write_text('Custom ungapped overlap assembler\n' + report)
+    print(report, end='')
 
 
 if __name__ == '__main__':

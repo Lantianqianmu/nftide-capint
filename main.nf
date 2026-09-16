@@ -7,7 +7,7 @@
 // nextflow run main.nf -resume -bg
 
 
-params.input_csv = '/data/xrz/capint/nextflow/samplesheet_test.csv'
+params.input_csv = '/data/xrz/capint/nextflow/samplesheet.csv'
 
 
 params.HBVfa_csv = "/data/xrz/capint/nextflow/meta_all_assembled_fa.csv"
@@ -19,14 +19,19 @@ params.host_bwa_prefix = "hg38.fa"
 
 // --- HIVID pipeline parameters ---
 params.bwaMinScore = 15         // bwa mem -T: minimum score to report an alignment (0 = too slow/huge output)
-params.minMatch = 30           // min match length (bp) on host & HBV for a breakpoint
+params.minMatch = 30           // each host/HBV anchor must align strictly more than this many bp
 params.minOverlap = 6          // PE-assembly: minimum overlap (>5 bp) required for splicing
 params.maxMismatchRate = 0.2   // PE-assembly: max mismatch rate allowed in the overlap
 params.mergeDist = 20          // merge breakpoints within 20 bp
 params.nnssThreshold = 1       // NNSS >= 1 is regarded as a true signal
 params.peAssembleCustom = false // true = use the custom PE assembly script, false (default) = use bbmerge.sh
 params.keepUnmerged = true       // true (default) = count non-overlapping chimeric pairs into NSS of supported breakpoints; false = ignore them
-params.supportDist = 300        // max distance (bp) from an unmerged support pair to a breakpoint (host side)
+params.supportDist = 500        // maximum total unsequenced span across host and HBV
+params.minUnique = 20           // aligned bases exclusive to each reference
+params.maxJunctionOverlap = 10  // maximum microhomology length
+params.junctionScoreMargin = 10 // split score advantage over best single alignment
+params.minMapq = 20             // lower values are retained as ambiguous evidence
+params.altScoreDelta = 5        // retain competing junction placements within this score
 
 
 process MERGE_FQ {
@@ -137,8 +142,8 @@ process FIRST_ALIGN {
 
     script:
     """
-    bwa mem -SP -T ${params.bwaMinScore} -t ${task.cpus} ${host_index}/${params.host_bwa_prefix} ${r1} ${r2} 2> ${meta.id}_host.log > ${meta.id}_host.sam
-    bwa mem -SP -T ${params.bwaMinScore} -t ${task.cpus} ${hbv_index}/genome.fa ${r1} ${r2} 2> ${meta.id}_hbv.log > ${meta.id}_hbv.sam
+    bwa mem -SP -Y -T ${params.bwaMinScore} -t ${task.cpus} ${host_index}/${params.host_bwa_prefix} ${r1} ${r2} 2> ${meta.id}_host.log > ${meta.id}_host.sam
+    bwa mem -SP -Y -T ${params.bwaMinScore} -t ${task.cpus} ${hbv_index}/genome.fa ${r1} ${r2} 2> ${meta.id}_hbv.log > ${meta.id}_hbv.sam
     samtools view -bS ${meta.id}_host.sam > ${meta.id}_host.bam
     samtools view -bS ${meta.id}_hbv.sam > ${meta.id}_hbv.bam
     cat ${meta.id}_host.log ${meta.id}_hbv.log > ${meta.id}_first_align.log
@@ -150,15 +155,17 @@ process FILTER_CHIMERIC {
     tag "Filtering chimeric reads of ${meta.id}"
 
     input:
-    tuple val(meta), path(host_sam), path(hbv_sam)
+    tuple val(meta), path(host_sam), path(hbv_sam), path(trim_r1), path(trim_r2)
 
     output:
     tuple val(meta), path("${meta.id}_chimeric_R1.fq.gz"), path("${meta.id}_chimeric_R2.fq.gz"), emit: chimeric_fq
     tuple val(meta), path("${meta.id}_chimeric.log"), emit: chimeric_log
+    tuple val(meta), path("${meta.id}_molecule_map.tsv"), emit: molecule_map
 
     script:
     """
-    filter_chimeric.py ${host_sam} ${hbv_sam} 2> ${meta.id}_chimeric.log
+    filter_chimeric.py ${host_sam} ${hbv_sam} --r1 ${trim_r1} --r2 ${trim_r2} 2> ${meta.id}_chimeric.log
+    mv molecule_map.tsv ${meta.id}_molecule_map.tsv
     mv chimeric_R1.fq.gz ${meta.id}_chimeric_R1.fq.gz
     mv chimeric_R2.fq.gz ${meta.id}_chimeric_R2.fq.gz
     """
@@ -191,32 +198,16 @@ process PE_ASSEMBLE {
     tuple val(meta), path("${meta.id}_merged.fq.gz"), emit: merged_fq
     tuple val(meta), path("${meta.id}_unmerged_R1.fq.gz"), path("${meta.id}_unmerged_R2.fq.gz"), emit: unmerged_fq
 
+    tuple val(meta), path("${meta.id}_assembly.log"), path("${meta.id}_assembly_qc.json"), emit: assembly_qc
+
     script:
     """
-    # NOTE: use outu= (interleaved) instead of outu1=+outu2= -- outu2 hangs
-    # (java.lang.AssertionError) with BBMap 39.81 / OpenJDK 23 in this env.
-    bbmerge.sh in1=${chim_R1} in2=${chim_R2} \\
-        out=${meta.id}_merged.fq.gz \\
-        outu=${meta.id}_unmerged.fq.gz \\
-        minoverlap=${params.minOverlap} \\
-        minoverlap0=${params.minOverlap} \\
-        maxratio=${params.maxMismatchRate} \\
-        threads=${task.cpus}
-
-    # keepUnmerged=true : split the interleaved unmerged reads into R1 / R2 and
-    #   rename the ends /1 /2 -> they are counted into the NSS of the
-    #   breakpoints they support (COUNT_UNMERGED_NSS)
-    # keepUnmerged=false: emit empty unmerged files (no NSS support), matching
-    #   HIVID exactly (only merged/spliced reads are used)
-    if [ ${params.keepUnmerged} = true ]; then
-        gzip -dc ${meta.id}_unmerged.fq.gz | awk '{ if ((NR-1)%8 < 4) print > "${meta.id}_u1_tmp"; else print > "${meta.id}_u2_tmp" }'
-        awk 'NR%4==1 { \$1 = \$1 "/1" } { print }' ${meta.id}_u1_tmp | gzip -c > ${meta.id}_unmerged_R1.fq.gz
-        awk 'NR%4==1 { \$1 = \$1 "/2" } { print }' ${meta.id}_u2_tmp | gzip -c > ${meta.id}_unmerged_R2.fq.gz
-        rm -f ${meta.id}_u1_tmp ${meta.id}_u2_tmp
-    else
-        gzip -c /dev/null > ${meta.id}_unmerged_R1.fq.gz
-        gzip -c /dev/null > ${meta.id}_unmerged_R2.fq.gz
-    fi
+    assemble_pairs.py ${chim_R1} ${chim_R2} \\
+        --prefix ${meta.id} \\
+        --min-overlap ${params.minOverlap} \\
+        --max-mismatch ${params.maxMismatchRate} \\
+        --threads ${task.cpus} \\
+        --keep-unmerged ${params.keepUnmerged}
     """
 }
 
@@ -231,15 +222,15 @@ process PE_ASSEMBLE_CUSTOM {
     tuple val(meta), path("${meta.id}_merged.fq.gz"), emit: merged_fq
     tuple val(meta), path("${meta.id}_unmerged_R1.fq.gz"), path("${meta.id}_unmerged_R2.fq.gz"), emit: unmerged_fq
 
+    tuple val(meta), path("${meta.id}_assembly.log"), path("${meta.id}_assembly_qc.json"), emit: assembly_qc
+
     script:
     """
     pe_assemble.py ${chim_R1} ${chim_R2} \\
-        --out ${meta.id}_merged.fq.gz \\
-        --out-u1 ${meta.id}_unmerged_R1.fq.gz \\
-        --out-u2 ${meta.id}_unmerged_R2.fq.gz \\
+        --prefix ${meta.id} \\
         --min-overlap ${params.minOverlap} \\
         --max-mismatch ${params.maxMismatchRate} \\
-        ${params.keepUnmerged ? '--keep-unmerged' : ''}
+        --keep-unmerged ${params.keepUnmerged}
     """
 }
 
@@ -256,9 +247,9 @@ process REMAP {
 
     script:
     """
-    bwa mem -SP -T ${params.bwaMinScore} -t ${task.cpus} ${host_index}/${params.host_bwa_prefix} ${merged_fq} 2> ${meta.id}_remap_host.log > ${meta.id}_remap_host.sam
-    bwa mem -SP -T ${params.bwaMinScore} -t ${task.cpus} ${hbv_index}/genome.fa ${merged_fq} 2> ${meta.id}_remap_hbv.log > ${meta.id}_remap_hbv.sam
-    call_breakpoints.py ${meta.id}_remap_host.sam ${meta.id}_remap_hbv.sam --min-match ${params.minMatch} --host-index ${host_index}/${params.host_bwa_prefix} --min-score ${params.bwaMinScore} --sample ${meta.id} > ${meta.id}_breakpoints.txt
+    bwa mem -SP -Y -T ${params.bwaMinScore} -t ${task.cpus} ${host_index}/${params.host_bwa_prefix} ${merged_fq} 2> ${meta.id}_remap_host.log > ${meta.id}_remap_host.sam
+    bwa mem -SP -Y -T ${params.bwaMinScore} -t ${task.cpus} ${hbv_index}/genome.fa ${merged_fq} 2> ${meta.id}_remap_hbv.log > ${meta.id}_remap_hbv.sam
+    call_breakpoints.py ${meta.id}_remap_host.sam ${meta.id}_remap_hbv.sam --min-match ${params.minMatch} --host-index ${host_index}/${params.host_bwa_prefix} --min-score ${params.bwaMinScore} --sample ${meta.id} --min-unique ${params.minUnique} --max-overlap ${params.maxJunctionOverlap} --score-margin ${params.junctionScoreMargin} --min-mapq ${params.minMapq} --alt-score-delta ${params.altScoreDelta} > ${meta.id}_breakpoints.txt
     """
 }
 
@@ -291,9 +282,9 @@ process COUNT_UNMERGED_NSS {
 
     script:
     """
-    bwa mem -SP -T ${params.bwaMinScore} -t ${task.cpus} ${host_index}/${params.host_bwa_prefix} ${unmerged_R1} ${unmerged_R2} 2> ${meta.id}_support_host.log > ${meta.id}_support_host.sam
-    bwa mem -SP -T ${params.bwaMinScore} -t ${task.cpus} ${hbv_index}/genome.fa ${unmerged_R1} ${unmerged_R2} 2> ${meta.id}_support_hbv.log > ${meta.id}_support_hbv.sam
-    count_support.py ${meta.id}_support_host.sam ${meta.id}_support_hbv.sam ${breakpoints} --min-match ${params.minMatch} --dist ${params.supportDist} --host-index ${host_index}/${params.host_bwa_prefix} --min-score ${params.bwaMinScore} --sample ${meta.id} > ${meta.id}_breakpoints_combined.txt
+    bwa mem -SP -Y -T ${params.bwaMinScore} -t ${task.cpus} ${host_index}/${params.host_bwa_prefix} ${unmerged_R1} ${unmerged_R2} 2> ${meta.id}_support_host.log > ${meta.id}_support_host.sam
+    bwa mem -SP -Y -T ${params.bwaMinScore} -t ${task.cpus} ${hbv_index}/genome.fa ${unmerged_R1} ${unmerged_R2} 2> ${meta.id}_support_hbv.log > ${meta.id}_support_hbv.sam
+    count_support.py ${meta.id}_support_host.sam ${meta.id}_support_hbv.sam ${breakpoints} --min-match ${params.minMatch} --dist ${params.supportDist} --merge-dist ${params.mergeDist} --host-index ${host_index}/${params.host_bwa_prefix} --min-score ${params.bwaMinScore} --sample ${meta.id} --min-unique ${params.minUnique} --max-overlap ${params.maxJunctionOverlap} --score-margin ${params.junctionScoreMargin} --min-mapq ${params.minMapq} --alt-score-delta ${params.altScoreDelta} > ${meta.id}_breakpoints_combined.txt
     """
 }
 
@@ -415,7 +406,7 @@ workflow {
 
     // step 2b: filter chimeric read pairs (host + HBV)
     // (separate process so changes here do NOT re-run the expensive bwa step)
-    FILTER_CHIMERIC(FIRST_ALIGN.out.aligned_sam)
+    FILTER_CHIMERIC(FIRST_ALIGN.out.aligned_sam.join(ch_trimmed))
 
     // step 2c: HBV-capture QC (total read pairs, HBV-aligned pairs, proportion)
     ch_qc_in = FIRST_ALIGN.out.aligned_sam
@@ -429,16 +420,18 @@ workflow {
 
     // step 3: paired-end assembly of chimeric reads
     // default: bbmerge.sh; only use the custom script when peAssembleCustom = true
-    // merged/spliced reads define the breakpoints; unmerged pairs (if kept)
-    // support those breakpoints and are counted into their NSS
+    // Sequenced junctions from merged reads or individual mates take priority.
+    // Discordant pairs support compatible sequenced junctions or retain estimated coordinates.
     if (params.peAssembleCustom) {
         PE_ASSEMBLE_CUSTOM(FILTER_CHIMERIC.out.chimeric_fq)
         ch_merged = PE_ASSEMBLE_CUSTOM.out.merged_fq
         ch_unmerged = PE_ASSEMBLE_CUSTOM.out.unmerged_fq
+        ch_assembly_qc = PE_ASSEMBLE_CUSTOM.out.assembly_qc
     } else {
         PE_ASSEMBLE(FILTER_CHIMERIC.out.chimeric_fq)
         ch_merged = PE_ASSEMBLE.out.merged_fq
         ch_unmerged = PE_ASSEMBLE.out.unmerged_fq
+        ch_assembly_qc = PE_ASSEMBLE.out.assembly_qc
     }
 
     // step 4: re-mapping + breakpoint calling (on merged reads only)
@@ -463,7 +456,7 @@ workflow {
     COUNT_UNMERGED_NSS(ch_support_in)
 
     // step 5: merge ALL breakpoints (merged + unmerged) within 20 bp;
-    // the representative takes the highest MAPQ, NSS is summed
+    // both references and orientations must agree; NSS counts molecule proxies
     MERGE_SIGNAL(COUNT_UNMERGED_NSS.out.breakpoints)
 
     // step 6: NNSS normalization (NSS already includes unmerged support)
@@ -481,6 +474,8 @@ workflow {
     out_hbv_qc = QC_CAPTURE.out.qc_tsv
     out_chimeric_fastqs = FILTER_CHIMERIC.out.chimeric_fq
     out_chimeric_logs = FILTER_CHIMERIC.out.chimeric_log
+    out_molecule_map = FILTER_CHIMERIC.out.molecule_map
+    out_assembly_qc = ch_assembly_qc
     out_assembled_reads = ch_merged
     out_unmerged_reads = ch_unmerged
     out_hbv_fa = EXTRACT_HBV_FA.out.hbv_fa
@@ -497,6 +492,12 @@ workflow {
 }
 
 output {
+    out_assembly_qc {
+        path { meta, _log, _qc -> "${meta.id}/assembly" }
+    }
+    out_molecule_map {
+        path { meta, _f -> "${meta.id}/qc" }
+    }
     out_trimmed_fastqs {
         path { meta, _f1, _f2 -> "${meta.id}/fastqs" }
     }
