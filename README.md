@@ -475,64 +475,6 @@ its length is unknown; it must not be interpreted as zero.
 The removed `maxJunctionGap` parameter and Python `--max-gap` option are no
 longer used. Regenerate REMAP and downstream outputs to populate the new column.
 
-### Large evidence fields and resuming failed runs ###
-
-If the task reports this exact error:
-
-```text
-_csv.Error: field larger than field limit (131072)
-```
-
-Python's default CSV field limit was exceeded while reading an intermediate
-breakpoint TSV. Repeat-rich candidates can contain large `secondary_events`
-or `molecules` JSON fields. This error does **not** mean that the input
-samplesheet is malformed. Do not shorten the JSON, remove candidate rows, or
-convert the files: doing so can discard evidence.
-
-(1) Use the corrected scripts in this repository. The fix is already included:
-`bin/table_io.py` raises the CSV field limit to the largest supported value,
-and `junctions.py`, `filter_signal.py`, and `collapse_secondary.py` use that
-reader. If running another copy of the pipeline, update those scripts together
-from this corrected copy. No extra Python package or command-line parameter
-is required. Raising the limit in a separate Python terminal does not affect
-the pipeline's Python processes.
-
-(2) Keep the failed run's `work/` and `.nextflow/` directories. Return to the
-**same directory from which you originally launched Nextflow**, activate the
-environment, and rerun your original command with `-resume` appended. Keep the
-same input files, reference paths, parameters, and output directory. For a run
-originally launched from this repository, the command has this form:
-
-```bash
-conda activate nftide-capint
-cd /data/xrz/capint/nextflow
-
-# Repeat YOUR original nextflow command and add -resume:
-nextflow run main.nf \
-  --input_csv samplesheet.csv \
-  --HBVfa_csv meta_all_assembled_fa.csv \
-  --host_bwa_dir /data/xrz/ref/hg38/hg38_bwa \
-  --host_bwa_prefix hg38.fa \
-  -output-dir /path/to/your/original_output \
-  -resume
-```
-
-Replace the example paths with those from the failed run and include any other
-options you originally supplied. Nextflow reuses eligible completed tasks and
-reruns failed or invalidated tasks; it does not require manual editing of
-cached breakpoint tables. If you launched other runs afterwards, select the
-failed run explicitly with `-resume <run-name-or-session-id>`; `nextflow log`
-lists prior runs. If the work/cache directories were deleted, rerun normally;
-missing cached results must be recomputed.
-
-(3) If the **same error persists with the corrected scripts**, inspect the
-new `.nextflow.log` for the failed task's work directory, then read that task's
-`.command.err` and `.command.sh`. The traceback identifies the Python script
-that still uses the default field limit. Check that the launch command points
-to the corrected repository and that the failing reader uses `table_io.py`.
-Keep the full traceback and task path for diagnosis. Other CSV errors, such as
-missing columns or malformed quoting, need a separate diagnosis; increasing
-the field limit does not fix them.
 
 ### Work files and reports ###
 
