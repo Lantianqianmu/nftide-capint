@@ -145,7 +145,7 @@ nextflow run main.nf \
   --HBVfa_csv meta_all_assembled_fa.csv \
   --host_bwa_dir /data/xrz/ref/hg38/hg38_bwa \
   --host_bwa_prefix hg38.fa \
-  -output-dir /data/xrz/capint/output_corrected \
+  -output-dir /data/xrz/capint/output_test \
   -with-report nftide-capint_report.html \
   -with-timeline nftide-capint_timeline.html \
   -with-trace nftide-capint_trace.tsv \
