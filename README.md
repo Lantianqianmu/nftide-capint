@@ -221,13 +221,6 @@ more than 30 bp by default), regardless of the intervening sequence length.
 Overlapping alignments still require the overlap, exclusive-sequence and score
 checks; alignment ambiguity remains annotated.
 
-Earlier 10-bp and 30-bp gap limits have been removed. The Sanger-verified human
-breakpoint chr5:1295257 has 15-bp query gaps in the archived T9/N9 supporting
-alignments and a 23-bp gap in the corrected N10 merged-read alignment. These
-remain `sequenced_gap` calls with their anchor boundary coordinates and detected
-gap lengths. An unassigned query segment does not, by itself, establish its
-biological origin. Regression SAM fixtures are in `tests/fixtures/chr5_1295257/`.
-
 The HBV reference remains linear and sample-specific; this revision does not
 standardize HBV coordinates between samples or resolve circular-origin crossings.
 
