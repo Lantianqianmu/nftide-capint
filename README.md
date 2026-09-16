@@ -213,18 +213,6 @@ checks; alignment ambiguity remains annotated.
 The HBV reference remains linear and sample-specific; this revision does not
 standardize HBV coordinates between samples or resolve circular-origin crossings.
 
-### Validation and rerunning ###
-
-Run `python -m unittest discover -s tests -v` for regression tests.
-With all dependencies on PATH, `python tests/smoke_pipeline.py` runs the actual
-Nextflow workflow against deterministic tiny synthetic references in `/tmp`.
-Pass `--custom` to exercise the optional Python assembler instead of BBMerge.
-
-The breakpoint schema and support semantics changed. Regenerate candidate
-FASTQs and every downstream stage; old breakpoint tables cannot be mixed with
-new ones. Prefer a fresh output directory for comparison with previous results.
-The new BWA commands and extraction inputs also invalidate their old task cache
-entries. Do not interpret older results as corrected without rerunning.
 
 ### BBMerge wrapper output contract ###
 
