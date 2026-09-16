@@ -42,11 +42,11 @@ cd /data/xrz/capint/nextflow
 (2) Create and activate a Conda environment with explicit package versions:
 
 ```bash
-conda create -n nftide-survirus \
+conda create -n nftide-capint \
   --override-channels -c conda-forge -c bioconda \
   python=3.12.13 nextflow=25.10.2 openjdk=23.0.2 \
   bwa=0.7.19 samtools=1.23.1 cutadapt=5.2 bbmap=39.81
-conda activate nftide-survirus
+conda activate nftide-capint
 ```
 
 `bbmap` supplies `bbmerge.sh`; use the `bwa` package for BWA-MEM. These versions
@@ -73,12 +73,10 @@ or automatically activate an environment. After installation, record the exact
 resolved packages for reproducibility:
 
 ```bash
-conda list -n nftide-survirus --explicit > nftide-survirus-conda-explicit.txt
+conda list -n nftide-capint --explicit > nftide-capint-conda-explicit.txt
 ```
 
-The environment name and documentation title do not change the implementation:
-this repository runs the HIVID-derived BWA/BBMerge workflow described below;
-it does not invoke the separate SurVirus software.
+This repository runs the HIVID-derived BWA/BBMerge workflow described below.
 
 (3) Prepare a human BWA index and configure its directory and prefix. Current
 defaults are:
@@ -148,9 +146,9 @@ nextflow run main.nf \
   --host_bwa_dir /data/xrz/ref/hg38/hg38_bwa \
   --host_bwa_prefix hg38.fa \
   -output-dir /data/xrz/capint/output_corrected \
-  -with-report nf_hivid_report.html \
-  -with-timeline nf_hivid_timeline.html \
-  -with-trace nf_hivid_trace.tsv \
+  -with-report nftide-capint_report.html \
+  -with-timeline nftide-capint_timeline.html \
+  -with-trace nftide-capint_trace.tsv \
   -resume -bg
 ```
 
