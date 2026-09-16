@@ -535,32 +535,6 @@ resume the original command with `-resume` after updating the scripts. Completed
 compatible tasks can be reused; interrupted tasks may restart. The failed run's
 `work/` and `.nextflow/` directories must remain available.
 
-### Assembly integrity ###
-
-The default BBMerge task uses one explicitly interleaved input stream. This
-avoids the `PairStreamer` list-size mismatch observed with separate R1/R2
-inputs in BBMap 39.81. Worker-thread exceptions can occur even when BBMerge
-returns exit code 0; the wrapper checks its log and verifies that the merged
-and unmerged outputs account for every input pair exactly once, by read name.
-These checks also run when `keepUnmerged=false`, before unmerged pairs are
-excluded from downstream analysis.
-
-The assembly folder publishes `<sample>_assembly.log` and
-`<sample>_assembly_qc.json` for both assembly paths. The JSON reports
-input pairs, merged pairs and unmerged pairs. HBV capture QC counts all
-HBV-aligned pairs; assembly input consists of sequence-deduplicated candidate
-pairs, so those two input counts need not agree.
-
-A previous run can contain empty or partial assembly outputs despite a
-successful Nextflow status. Resume with `-resume` after this fix: the changed
-assembly task will run again, followed by dependent stages. Preserve the
-existing upstream FASTQs, alignments, `work/` and `.nextflow/` caches.
-
-The underlying installed-build defect and the controlled 3,000-pair reproduction
-are documented in [BBMerge reader diagnosis](docs/bbmerge-39.81-reader.md).
-The failure can occur even with equal-length mates and one worker thread,
-because paired files are split into independent byte-sized input batches.
-The pipeline's interleaved stream avoids this defective pairing path.
 
 ### Work files and reports ###
 
