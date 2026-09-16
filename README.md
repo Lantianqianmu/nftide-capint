@@ -18,15 +18,15 @@ Reduce concurrency on smaller servers. Published results use copy mode;
 
 ## Software dependencies ##
 
-Dependencies | Version / configuration
+Dependencies | Version
 ------------- | -------------
-Nextflow | 25.10+; workflow validation used 25.10.2
-Java | Compatible with the installed Nextflow and BBMerge
-Python | Python 3.9+
-BWA | BWA-MEM; required for initial mapping, remapping and alternative-placement analysis
-samtools | Converts the initial SAM alignments to BAM
-cutadapt | Removes adapters from paired-end reads
-BBMerge | Default paired-end assembler; `bbmerge.sh` must be on PATH
+Nextflow | 25.10.2
+Java / OpenJDK | 23.0.2
+Python | 3.12.13
+BWA | 0.7.19
+samtools | 1.23.1
+cutadapt | 5.2
+BBMerge / BBMap | 39.81
 
 Dependencies are resolved from the active environment. The Python analysis
 scripts use the standard library and are provided in `bin/`.
@@ -39,9 +39,46 @@ scripts use the standard library and are provided in `bin/`.
 cd /data/xrz/capint/nextflow
 ```
 
-(2) Activate an environment containing the software dependencies and ensure
-their executables are on PATH. The pipeline does not currently provide a pinned
-conda environment file.
+(2) Create and activate a Conda environment with explicit package versions:
+
+```bash
+conda create -n nftide-survirus \
+  --override-channels -c conda-forge -c bioconda \
+  python=3.12.13 nextflow=25.10.2 openjdk=23.0.2 \
+  bwa=0.7.19 samtools=1.23.1 cutadapt=5.2 bbmap=39.81
+conda activate nftide-survirus
+```
+
+`bbmap` supplies `bbmerge.sh`; use the `bwa` package for BWA-MEM. These versions
+come from the existing local installations. The combined environment creation
+command has not been freshly solved or installed as part of this documentation
+update. Conda will resolve the remaining dependencies; this is not a complete
+build-level lock file.
+
+Check the executables before launching:
+
+```bash
+python --version
+java -version
+nextflow -version
+samtools --version
+cutadapt --version
+command -v bwa
+command -v bbmerge.sh
+```
+
+Keep this environment active when running `nextflow run main.nf`; processing
+tasks inherit PATH. The pipeline does not provide a pinned environment file
+or automatically activate an environment. After installation, record the exact
+resolved packages for reproducibility:
+
+```bash
+conda list -n nftide-survirus --explicit > nftide-survirus-conda-explicit.txt
+```
+
+The environment name and documentation title do not change the implementation:
+this repository runs the HIVID-derived BWA/BBMerge workflow described below;
+it does not invoke the separate SurVirus software.
 
 (3) Prepare a human BWA index and configure its directory and prefix. Current
 defaults are:
@@ -117,13 +154,25 @@ nextflow run main.nf \
   -resume -bg
 ```
 
-`-output-dir`: Output directory; the configured default is `/data/xrz/capint/output_test`.  
-`--input_csv`: Samplesheet; the current default is `/data/xrz/capint/nextflow/samplesheet.csv`.  
-`--HBVfa_csv`: Per-sample HBV sequences; the default path is shown above.  
-`-resume`: Reuse completed tasks whose inputs and settings match the cache; retain `work/` and `.nextflow/`.  
-`-bg`: Run Nextflow in the background.
+### General parameters ###
 
-### General and assembly parameters ###
+Parameter | Default in the current pipeline | Description
+------------- | ------------- | -------------
+`-output-dir` | `/data/xrz/capint/output_test` | Published results directory; each sample receives its own subdirectory. This is a Nextflow option, not `--output_dir`.
+`--input_csv` | `/data/xrz/capint/nextflow/samplesheet.csv` | FASTQ samplesheet with `sample`, `fastq_1`, and `fastq_2` columns.
+`--HBVfa_csv` | `/data/xrz/capint/nextflow/meta_all_assembled_fa.csv` | Sample-specific HBV sequences in `sample` and `sequence` columns.
+`--host_bwa_dir` | `/data/xrz/ref/hg38/hg38_bwa` | Directory containing the prebuilt host BWA index.
+`--host_bwa_prefix` | `hg38.fa` | Index basename within that directory, including the FASTA extension when it is part of the index name. For example, sidecars are named `hg38.fa.amb`, `.ann`, `.bwt`, `.pac`, and `.sa`.
+`-resume` | Disabled unless supplied | Reuse eligible completed tasks; retain both `work/` and `.nextflow/`.
+`-bg` | Disabled unless supplied | Run Nextflow in the background; inspect `.nextflow.log` for progress.
+`-with-report` | Disabled unless supplied | Write an HTML execution report to the specified path.
+`-with-timeline` | Disabled unless supplied | Write an HTML task timeline to the specified path.
+`-with-trace` | Disabled unless supplied | Write a tab-delimited task execution trace to the specified path.
+
+Nextflow options use one hyphen; pipeline parameters use two. Resource settings
+are configured in `nextflow.config`, not through a custom `--cpus` parameter.
+
+### Alignment and assembly parameters ###
 
 Analysis parameters are defined in `main.nf` and can be overridden with
 `--parameter value`. Output and process-resource defaults are in
