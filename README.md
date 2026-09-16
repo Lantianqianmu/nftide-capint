@@ -78,7 +78,7 @@ conda list -n nftide-capint --explicit > nftide-capint-conda-explicit.txt
 
 This repository runs the HIVID-derived BWA/BBMerge workflow described below.
 
-(3) Prepare BWA index. 
+(3) Prepare BWA index for host. 
 
 ## Overview ##
 
