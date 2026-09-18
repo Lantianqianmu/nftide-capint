@@ -176,14 +176,14 @@ process QC_CAPTURE {
     tag "HBV-capture QC of ${meta.id}"
 
     input:
-    tuple val(meta), path(trim_R1), path(hbv_sam)
+    tuple val(meta), path(trim_R1), path(trim_R2), path(hbv_sam)
 
     output:
     tuple val(meta), path("${meta.id}_hbv_qc.tsv"), emit: qc_tsv
 
     script:
     """
-    qc_capture.py ${meta.id} ${trim_R1} ${hbv_sam} > ${meta.id}_hbv_qc.tsv
+    qc_capture.py ${meta.id} ${trim_R1} ${hbv_sam} --trim-r2 ${trim_R2} > ${meta.id}_hbv_qc.tsv
     """
 }
 
@@ -317,7 +317,7 @@ workflow {
 
     main:
     log.info """\
-      nftide-hivid (HBV integration breakpoint detection)
+      nftide-capint (HBV integration breakpoint detection)
       ===================================
       projectDir             :  ${projectDir}
       workingDir             :  ${workflow.outputDir}
@@ -411,10 +411,10 @@ workflow {
     // step 2c: HBV-capture QC (total read pairs, HBV-aligned pairs, proportion)
     ch_qc_in = FIRST_ALIGN.out.aligned_sam
         .map { meta, _host_sam, hbv_sam -> [ meta, hbv_sam ] }
-        .join(ch_trimmed.map { meta, r1, _r2 -> [ meta, r1 ] })
+        .join(ch_trimmed)
         .map { it ->
-            def (meta, hbv_sam, r1) = it
-            [ meta, r1, hbv_sam ]
+            def (meta, hbv_sam, r1, r2) = it
+            [ meta, r1, r2, hbv_sam ]
         }
     QC_CAPTURE(ch_qc_in)
 
